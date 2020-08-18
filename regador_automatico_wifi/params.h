@@ -13,3 +13,4 @@
 #define HUMIDITY_SENSOR 0
 #define TEMP_SENSOR 1
 #define LIGHT_SENSOR 2
+#define WATER_LEVEL_SENSOR 3

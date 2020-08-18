@@ -18,6 +18,7 @@ COROUTINE() {
 }
 
 double readSensor(int sensor) {
+	// Gets the individual bits from the sensor connector number and sends them to the CD74HC4067 IC
 	pinMode(S0, (sensor >> 0) & 1);
 	pinMode(S1, (sensor >> 1) & 1);
 	pinMode(S2, (sensor >> 2) & 1);
