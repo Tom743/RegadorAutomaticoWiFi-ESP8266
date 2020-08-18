@@ -10,17 +10,19 @@
 #include <FirebaseArduino.h>
 #include <AceRoutine.h>
 using namespace ace_routine;
+#include "params.h"
 
 
 COROUTINE() {
 
 }
 
-void setup()
-{
- 	Serial.begin(115200);
-
-	CoroutineScheduler::setup();
+double readSensor(int sensor) {
+	pinMode(S0, (sensor >> 0) & 1);
+	pinMode(S1, (sensor >> 1) & 1);
+	pinMode(S2, (sensor >> 2) & 1);
+	pinMode(S3, (sensor >> 3) & 1);
+	return analogRead(COMMON_ANALOG_INPUT);
 }
 
 void conectWiFi() {
@@ -35,7 +37,17 @@ void conectWiFi() {
 	Serial.println(WiFi.localIP());
 }
 
-void loop()
-{
+void setup() {
+ 	Serial.begin(115200);
+
+ 	pinMode(S0, OUTPUT);
+ 	pinMode(S1, OUTPUT);
+ 	pinMode(S2, OUTPUT);
+ 	pinMode(S3, OUTPUT);
+
+	CoroutineScheduler::setup();
+}
+
+void loop() {
 	CoroutineScheduler::loop();
 }
