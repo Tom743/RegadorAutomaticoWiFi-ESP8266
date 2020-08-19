@@ -13,16 +13,26 @@ using namespace ace_routine;
 #include "params.h"
 
 
-COROUTINE() {
-
+COROUTINE(checkAndIrrigate) {
+	int lastWatered = -WAIT_DELAY_SECONDS;
+	COROUTINE_LOOP() {
+		if (readSensor(HUMIDITY_SENSOR) > HUMIDITY_THRESHOLD && ((millis()/1000)-lastWatered) >= WAIT_DELAY_SECONDS) {
+		    digitalWrite(WATER_PUMP_PIN, HIGH);
+		    COROUTINE_DELAY_SECONDS(WATER_SECONDS);
+		    digitalWrite(WATER_PUMP_PIN, LOW);
+		    lastWatered = millis()/1000;
+		}
+		// TODO sendTelemetry(). This should trigger a coroutine and pass instantly to the next line, dont wait to send it
+		COROUTINE_DELAY_SECONDS(CHECK_TIME_SECONDS);
+	}
 }
 
 double readSensor(int sensor) {
-	// Gets the individual bits from the sensor connector number and sends them to the CD74HC4067 IC
-	pinMode(S0, (sensor >> 0) & 1);
-	pinMode(S1, (sensor >> 1) & 1);
-	pinMode(S2, (sensor >> 2) & 1);
-	pinMode(S3, (sensor >> 3) & 1);
+	// Gets the individual bits from the sensor conneciton number and sends them to the CD74HC4067 IC
+	digitalWrite(S0, (sensor >> 0) & 1);
+	digitalWrite(S1, (sensor >> 1) & 1);
+	digitalWrite(S2, (sensor >> 2) & 1);
+	digitalWrite(S3, (sensor >> 3) & 1);
 	return analogRead(COMMON_ANALOG_INPUT);
 }
 
@@ -45,6 +55,7 @@ void setup() {
  	pinMode(S1, OUTPUT);
  	pinMode(S2, OUTPUT);
  	pinMode(S3, OUTPUT);
+ 	pinMode(WATER_PUMP_PIN, OUTPUT);
 
 	CoroutineScheduler::setup();
 }
