@@ -14,7 +14,7 @@ using namespace ace_routine;
 
 
 COROUTINE(checkAndIrrigate) {
-	int lastWatered = -WAIT_DELAY_SECONDS;
+	static int lastWatered = -WAIT_DELAY_SECONDS;
 	COROUTINE_LOOP() {
 		if (readSensor(HUMIDITY_SENSOR) > HUMIDITY_THRESHOLD && ((millis()/1000)-lastWatered) >= WAIT_DELAY_SECONDS) {
 		    digitalWrite(WATER_PUMP_PIN, HIGH);
@@ -22,9 +22,21 @@ COROUTINE(checkAndIrrigate) {
 		    digitalWrite(WATER_PUMP_PIN, LOW);
 		    lastWatered = millis()/1000;
 		}
-		// TODO sendTelemetry(). This should trigger a coroutine and pass instantly to the next line, dont wait to send it
+		sendTelemetry.runCoroutine();
 		COROUTINE_DELAY_SECONDS(CHECK_TIME_SECONDS);
 	}
+}
+
+COROUTINE(sendTelemetry) {
+	COROUTINE_BEGIN();
+
+	if (!isWiFiConnected()) {
+		connectWiFi.runCoroutine()
+		COROUTINE_AWAIT(isWiFiConnected());
+	}
+	// TODO send
+
+	COROUTINE_END();
 }
 
 double readSensor(int sensor) {
@@ -36,17 +48,21 @@ double readSensor(int sensor) {
 	return analogRead(COMMON_ANALOG_INPUT);
 }
 
-void conectWiFi() {
+COROUTINE(conectWiFi()) {
+	COROUTINE_BEGIN();
 	WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 	Serial.print("connecting");
-	while (WiFi.status() != WL_CONNECTED) {
+	while (isWiFiConnected()) {
 		Serial.print(".");
-		delay(500);
+		COROUTINE_DELAY_MILLIS(500);
 	}
 	Serial.println();
 	Serial.print("connected: ");
 	Serial.println(WiFi.localIP());
+	COROUTINE_END();
 }
+
+bool isWiFiConnected() { return WiFi.status() != WL_CONNECTED; }
 
 void setup() {
  	Serial.begin(115200);
