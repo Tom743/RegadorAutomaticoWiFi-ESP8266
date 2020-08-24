@@ -7,31 +7,63 @@
 //********************************************************************//
 
 #include <ESP8266WiFi.h>
-#include <FirebaseArduino.h>
-#include <AceRoutine.h>
-using namespace ace_routine;
+#include <FirebaseArduino.h>  // Needs ArduinoJson library version 5. Doesn't compile with v6
+#include <Scheduler.h>
 #include "params.h"
 
+
+double readSensor(int sensor) {
+	// Gets the individual bits from the sensor conneciton number and sends them to the CD74HC4067 IC
+	digitalWrite(S0, (sensor >> 0) & 1);
+	digitalWrite(S1, (sensor >> 1) & 1);
+	digitalWrite(S2, (sensor >> 2) & 1);
+	digitalWrite(S3, (sensor >> 3) & 1);
+	return analogRead(COMMON_ANALOG_INPUT);
+}
 
 bool isWiFiConnected() {
 	return WiFi.status() == WL_CONNECTED;
 }
 
+class BaseTask: public Task {
+protected:
+	void loop() {
+		while (suspended) {
+			yield();
+		}
+	}
+	void suspendTask() {
+		suspended = true;
+	}
+public:
+	void runTask() {
+		suspended = false;
+	}
+	bool isSuspended() {
+		return suspended;
+	}
+	bool isRunning() {
+		return !suspended;
+	}
+private:
+	bool suspended = true;
+};
 
-static bool tryAgain;
-COROUTINE(connect) {
-	COROUTINE_LOOP() {
+class Connect: public BaseTask {
+public:
+	void loop() {
+		BaseTask::loop();
 		WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 		Serial.print("connecting");
 		while (!isWiFiConnected()) {
 			Serial.print(".");
-			COROUTINE_DELAY(500);
+			this->delay(500);
 		}
 		Serial.println();
 		Serial.print("Connected: ");
 		Serial.println(WiFi.localIP());
 
-		Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+		//Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
 		if (Firebase.success()) {
 			Firebase.stream(STREAM_DATA_REQUEST);
 			if (Firebase.failed()) {
@@ -53,29 +85,28 @@ COROUTINE(connect) {
 		}
 
 		if (!tryAgain) {
-			Serial.println("suspended");
-			connect.suspend();
-		} else {
 			Serial.println("Connected to firebase successfuly");
-			COROUTINE_DELAY(1000);
+			suspendTask();
+		} else {
+			Serial.println("Trying again");
 		}
 	}
-}
+private:
+	bool tryAgain = false;
+} connect;
 
-double readSensor(int sensor) {
-	// Gets the individual bits from the sensor conneciton number and sends them to the CD74HC4067 IC
-	digitalWrite(S0, (sensor >> 0) & 1);
-	digitalWrite(S1, (sensor >> 1) & 1);
-	digitalWrite(S2, (sensor >> 2) & 1);
-	digitalWrite(S3, (sensor >> 3) & 1);
-	return analogRead(COMMON_ANALOG_INPUT);
-}
-
-COROUTINE(sendTelemetry) {
-	COROUTINE_LOOP() {
+class SendTelemetry: public BaseTask {
+public:
+	void setup() {
+		suspendTask();
+	}
+	void loop() {
+		BaseTask::loop();
 		if (!isWiFiConnected() && connect.isSuspended()) {
-			connect.resume();
-			COROUTINE_AWAIT(connect.isSuspended());
+			connect.runTask();
+			while(connect.isRunning()) {
+				yield();
+			}
 		}
 		// TODO send for real
 		Serial.println(readSensor(HUMIDITY_SENSOR));
@@ -83,29 +114,33 @@ COROUTINE(sendTelemetry) {
 		Serial.println(readSensor(LIGHT_SENSOR));
 		Serial.println(readSensor(WATER_LEVEL_SENSOR));
 		Serial.println("ENVIANDO");
-		sendTelemetry.suspend();
+		suspendTask();
 	}
-}
+} sendTelemetry;
 
-COROUTINE(irrigate) {
-	COROUTINE_LOOP() {
+class Irrigate: public BaseTask {
+public:
+	void setup() {
+		suspendTask();
+	}
+	void loop() {
+		BaseTask::loop();
 		digitalWrite(WATER_PUMP_PIN, HIGH);
 		Serial.println("regando");
-		COROUTINE_DELAY_SECONDS(WATER_SECONDS);
+		this->delay(WATER_SECONDS*1000);
 		digitalWrite(WATER_PUMP_PIN, LOW);
-		irrigate.suspend();
+		suspendTask();
 	}
-}
+} irrigate;
 
-COROUTINE(checkAndIrrigate) {
-	COROUTINE_BEGIN();
-	static float lastWatered = 0;
-	while (true) {
-		Serial.println("check");
+class Check: public BaseTask {
+public:
+	void loop() {
+		Serial.println("checking");
 		if (readSensor(HUMIDITY_SENSOR) > HUMIDITY_THRESHOLD && ((millis() / 1000) - lastWatered) >= WAIT_DELAY_SECONDS) {
 			Serial.println("deberia regar");
 			if (irrigate.isSuspended()) {
-				irrigate.resume();
+				irrigate.runTask();
 			} else {
 				Serial.println("ya estoy regando");
 			}
@@ -113,24 +148,28 @@ COROUTINE(checkAndIrrigate) {
 		}
 		Serial.println("deberia enviar");
 		if (sendTelemetry.isSuspended()) {
-			sendTelemetry.resume();
+			sendTelemetry.runTask();
 		} else {
 			Serial.println("ya estoy enviando");
 		}
-		COROUTINE_DELAY_SECONDS(CHECK_TIME_SECONDS);
+		this->delay(CHECK_TIME_SECONDS*1000);
 	}
-	COROUTINE_END();
-}
+private:
+	float lastWatered = -WAIT_DELAY_SECONDS;
+} check;
 
-COROUTINE(listenStream) {
-	COROUTINE_LOOP() {
+class ListenStream: public BaseTask {
+public:
+	void loop() {
 		if (Firebase.failed()) {
 			Serial.println("Firebase error: ");
 			Serial.println(Firebase.error());
 			if (connect.isSuspended()) {
-				connect.resume();
+				connect.runTask();
 			}
-			COROUTINE_AWAIT(connect.isSuspended());
+			while (connect.isRunning()) {
+				yield();
+			}
 		}
 		if (Firebase.available()) {
 			static FirebaseObject event = Firebase.readEvent();
@@ -141,24 +180,24 @@ COROUTINE(listenStream) {
 			if (eventType == "put") {
 				if (eventPath == STREAM_DATA_REQUEST && event.getBool("data")) {
 					if (sendTelemetry.isSuspended()) {
-						sendTelemetry.resume();
+						sendTelemetry.runTask();
 					}
 					Firebase.setBool(STREAM_DATA_REQUEST, false);
 				}
 				if (eventPath == STREAM_WATER_NOW_REQUEST && event.getBool("data")) {
 					if (irrigate.isSuspended()) {
-						irrigate.resume();
+						irrigate.runTask();
 					}
 					if (sendTelemetry.isSuspended()) {
-						sendTelemetry.resume();
+						sendTelemetry.runTask();
 					}
 					Firebase.setBool(STREAM_WATER_NOW_REQUEST, false);
 				}
 			}
 		}
-		COROUTINE_DELAY(500);
+		this->delay(500);
 	}
-}
+} listenStream;
 
 void setup() {
 	Serial.begin(115200);
@@ -168,11 +207,12 @@ void setup() {
 	pinMode(S3, OUTPUT);
 	pinMode(WATER_PUMP_PIN, OUTPUT);
 
-	irrigate.suspend();
-	sendTelemetry.suspend();
-	CoroutineScheduler::setup();
+	Scheduler.start(&connect);
+	Scheduler.start(&sendTelemetry);
+	Scheduler.start(&irrigate);
+	Scheduler.start(&check);
+	Scheduler.start(&listenStream);
+	Scheduler.begin();
 }
 
-void loop() {
-	CoroutineScheduler::loop();
-}
+void loop() {}
