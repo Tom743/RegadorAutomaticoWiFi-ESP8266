@@ -12,8 +12,8 @@
 
 // Other values
 #define HUMIDITY_THRESHOLD 290  // Value from 1 (wet) to 1024 (dry)
-#define STREAM_DATA_REQUEST "request fresh data"
-#define STREAM_WATER_NOW_REQUEST "plants/plantita1/water now"
+#define STREAM_DATA_REQUEST "/request fresh data"
+#define STREAM_WATER_NOW_REQUEST "/plants/plantita1/water now"
 
 // Connections (GPIO pins are different to the printed ones on the board)
 #define WATER_PUMP_PIN 2  // D4

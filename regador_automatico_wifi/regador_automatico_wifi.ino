@@ -13,6 +13,8 @@
 #include <Scheduler.h>
 #include "params.h"
 
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", TIME_ZONE * 3600);
 
 double readSensor(int sensor) {
 	// Gets the individual bits from the sensor conneciton number and sends them to the CD74HC4067 IC
@@ -48,15 +50,11 @@ public:
 		return !suspended;
 	}
 private:
-	bool suspended = true;
+	bool suspended = false;
 };
 
-class Connect: public BaseTask { // TODO 24/AUG/2020 For some reason throws firebase error
+class Connect: public BaseTask {
 public:
-	void setup() {
-		WiFiUDP ntpUDP;
-		NTPClient timeClient(ntpUDP, "pool.ntp.org", TIME_ZONE * 3600);
-	}
 	void loop() {
 		BaseTask::loop();
 		WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -72,33 +70,10 @@ public:
 		timeClient.begin();
 
 		Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
-		if (Firebase.success()) {
-			String streams[2] = {STREAM_DATA_REQUEST, STREAM_WATER_NOW_REQUEST};
-			for (int i = 0; i < 2; ++i) {
-				Firebase.stream(streams[i]);
-				if (Firebase.failed()) {
-					Serial.println("Stream begin failed. Error:");
-					Serial.println(Firebase.error());
-					tryAgain = true;
-				} else {
-					tryAgain = false;
-				}
-			}
-		} else {
-			Serial.println("Stream begin failed. Error:");
-			Serial.println(Firebase.error());
-			tryAgain = true;
-		}
+		Firebase.stream("/");
 
-		if (!tryAgain) {
-			Serial.println("Connected to firebase successfuly");
-			suspendTask();
-		} else {
-			Serial.println("Trying again");
-		}
+		suspendTask();
 	}
-private:
-	bool tryAgain = false;
 } connect;
 
 class SendTelemetry: public BaseTask {
@@ -110,10 +85,11 @@ public:
 		BaseTask::loop();
 		if (!isWiFiConnected() && connect.isSuspended()) {
 			connect.runTask();
-			while(connect.isRunning()) {
-				yield();
-			}
 		}
+		while (connect.isRunning()) {
+			yield();
+		}
+
 		timeClient.update();
 		// TODO send for real
 		Serial.println(timeClient.getEpochTime());
@@ -169,30 +145,35 @@ private:
 class ListenStream: public BaseTask {
 public:
 	void loop() {
-		if (Firebase.failed()) {
-			Serial.println("Firebase error: ");
-			Serial.println(Firebase.error());
-			if (connect.isSuspended()) {
-				connect.runTask();
-			}
-			while (connect.isRunning()) {
-				yield();
-			}
+		//TODO 25/AUG/2020 For some reason Firebase.setXXX() called from the loop of a task makes the program crash
+		if (!isWiFiConnected() && connect.isSuspended()) {
+			connect.runTask();
 		}
+		while (connect.isRunning()) {
+			yield();
+		}
+
+		if (Firebase.failed()) {
+			Serial.println("Streaming error: ");
+			Serial.println(Firebase.error());
+		}
+
 		if (Firebase.available()) {
-			static FirebaseObject event = Firebase.readEvent();
-			static String eventType = event.getString("type");
+			FirebaseObject event = Firebase.readEvent();
+			String path = event.getString("path");
+			String eventType = event.getString("type");
 			eventType.toLowerCase();
-			static String eventPath = event.getString("path");
 			// TODO see what happens if both values change
 			if (eventType == "put") {
-				if (eventPath == STREAM_DATA_REQUEST && event.getBool("data")) {
+				if (path == STREAM_DATA_REQUEST && event.getBool("data")) {
+					Serial.println("send request");
 					if (sendTelemetry.isSuspended()) {
 						sendTelemetry.runTask();
 					}
 					Firebase.setBool(STREAM_DATA_REQUEST, false);
 				}
-				if (eventPath == STREAM_WATER_NOW_REQUEST && event.getBool("data")) {
+				if (path == STREAM_WATER_NOW_REQUEST && event.getBool("data")) {
+					Serial.println("water request");
 					if (irrigate.isSuspended()) {
 						irrigate.runTask();
 					}
@@ -202,8 +183,8 @@ public:
 					Firebase.setBool(STREAM_WATER_NOW_REQUEST, false);
 				}
 			}
+			this->delay(500);
 		}
-		this->delay(500);
 	}
 } listenStream;
 
@@ -219,7 +200,7 @@ void setup() {
 	Scheduler.start(&sendTelemetry);
 	Scheduler.start(&irrigate);
 	Scheduler.start(&check);
-	Scheduler.start(&listenStream);
+	// Scheduler.start(&listenStream); // See TODO in ListenStream task
 	Scheduler.begin();
 }
 
