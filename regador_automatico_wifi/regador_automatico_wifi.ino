@@ -7,6 +7,8 @@
 //********************************************************************//
 
 #include <ESP8266WiFi.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 #include <FirebaseArduino.h>  // Needs ArduinoJson library version 5. Doesn't compile with v6
 #include <Scheduler.h>
 #include "params.h"
@@ -49,8 +51,12 @@ private:
 	bool suspended = true;
 };
 
-class Connect: public BaseTask {
+class Connect: public BaseTask { // TODO 24/AUG/2020 For some reason throws firebase error
 public:
+	void setup() {
+		WiFiUDP ntpUDP;
+		NTPClient timeClient(ntpUDP, "pool.ntp.org", TIME_ZONE * 3600);
+	}
 	void loop() {
 		BaseTask::loop();
 		WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -63,24 +69,24 @@ public:
 		Serial.print("Connected: ");
 		Serial.println(WiFi.localIP());
 
-		//Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+		timeClient.begin();
+
+		Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
 		if (Firebase.success()) {
-			Firebase.stream(STREAM_DATA_REQUEST);
-			if (Firebase.failed()) {
-				Serial.println("Stream begin failed");
-				tryAgain = true;
-			} else {
-				tryAgain = false;
-			}
-			Firebase.stream(STREAM_WATER_NOW_REQUEST);
-			if (Firebase.failed()) {
-				Serial.println("Stream begin failed");
-				tryAgain = true;
-			} else {
-				tryAgain = false;
+			String streams[2] = {STREAM_DATA_REQUEST, STREAM_WATER_NOW_REQUEST};
+			for (int i = 0; i < 2; ++i) {
+				Firebase.stream(streams[i]);
+				if (Firebase.failed()) {
+					Serial.println("Stream begin failed. Error:");
+					Serial.println(Firebase.error());
+					tryAgain = true;
+				} else {
+					tryAgain = false;
+				}
 			}
 		} else {
-			Serial.println("Stream begin failed");
+			Serial.println("Stream begin failed. Error:");
+			Serial.println(Firebase.error());
 			tryAgain = true;
 		}
 
@@ -108,7 +114,9 @@ public:
 				yield();
 			}
 		}
+		timeClient.update();
 		// TODO send for real
+		Serial.println(timeClient.getEpochTime());
 		Serial.println(readSensor(HUMIDITY_SENSOR));
 		Serial.println(readSensor(TEMP_SENSOR));
 		Serial.println(readSensor(LIGHT_SENSOR));
@@ -127,7 +135,7 @@ public:
 		BaseTask::loop();
 		digitalWrite(WATER_PUMP_PIN, HIGH);
 		Serial.println("regando");
-		this->delay(WATER_SECONDS*1000);
+		this->delay(WATER_SECONDS * 1000);
 		digitalWrite(WATER_PUMP_PIN, LOW);
 		suspendTask();
 	}
@@ -152,7 +160,7 @@ public:
 		} else {
 			Serial.println("ya estoy enviando");
 		}
-		this->delay(CHECK_TIME_SECONDS*1000);
+		this->delay(CHECK_TIME_SECONDS * 1000);
 	}
 private:
 	float lastWatered = -WAIT_DELAY_SECONDS;
