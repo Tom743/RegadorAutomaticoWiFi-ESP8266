@@ -169,18 +169,17 @@ public:
 		if (firebaseStreamData.streamTimeout()) {
 			Serial.println("Stream timeout, resume streaming...\n");
 		}
-		// TODO there must be something wrong with the paths or something... just doesn't trigger anything
 		if (firebaseStreamData.streamAvailable()) {
 			if (firebaseStreamData.eventType() == "put" && firebaseStreamData.dataType() == "boolean") {
 				if (firebaseStreamData.boolData() == 1) {
-					if (firebaseStreamData.streamPath() == STREAM_DATA_REQUEST) {
+					if (firebaseStreamData.dataPath() == STREAM_DATA_REQUEST) {
 						Serial.println("Telemetry requested\n");
 						if (sendTelemetry.isSuspended()) {
 							sendTelemetry.runTask();
 						}
 						Firebase.setBool(firebaseStreamData, STREAM_DATA_REQUEST, false);
 					}
-					if (firebaseStreamData.streamPath() == STREAM_WATER_NOW_REQUEST) {
+					if (firebaseStreamData.dataPath() == STREAM_WATER_NOW_REQUEST) {
 						Serial.println("Irrigation requested\n");
 						if (irrigate.isSuspended()) {
 							irrigate.runTask();
