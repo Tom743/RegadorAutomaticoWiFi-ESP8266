@@ -6,12 +6,15 @@
 //  Notas   :                                                         //
 //********************************************************************//
 
+#include <FirebaseESP8266.h>
 #include <ESP8266WiFi.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <FirebaseArduino.h>  // Needs ArduinoJson library version 5. Doesn't compile with v6
 #include <Scheduler.h>
 #include "params.h"
+
+FirebaseData dataRequestStream;
+FirebaseData waterRequestStream;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", TIME_ZONE * 3600);
@@ -57,6 +60,7 @@ class Connect: public BaseTask {
 public:
 	void loop() {
 		BaseTask::loop();
+
 		WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 		Serial.print("connecting");
 		while (!isWiFiConnected()) {
@@ -69,8 +73,19 @@ public:
 
 		timeClient.begin();
 
+		// TODO 25/AUG/2020 See full settings for firebase
 		Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
-		Firebase.stream("/");
+		Firebase.reconnectWiFi(true);
+		if (!Firebase.beginStream(dataRequestStream, STREAM_DATA_REQUEST)) {
+			Serial.println("Can't begin stream connection...");
+			Serial.println("REASON: " + dataRequestStream.errorReason());
+			Serial.println();
+		}
+		if (!Firebase.beginStream(waterRequestStream, STREAM_WATER_NOW_REQUEST)) {
+			Serial.println("Can't begin stream connection...");
+			Serial.println("REASON: " + waterRequestStream.errorReason());
+			Serial.println();
+		}
 
 		suspendTask();
 	}
@@ -145,7 +160,6 @@ private:
 class ListenStream: public BaseTask {
 public:
 	void loop() {
-		//TODO 25/AUG/2020 For some reason Firebase.setXXX() called from the loop of a task makes the program crash
 		if (!isWiFiConnected() && connect.isSuspended()) {
 			connect.runTask();
 		}
@@ -153,38 +167,43 @@ public:
 			yield();
 		}
 
-		if (Firebase.failed()) {
-			Serial.println("Streaming error: ");
-			Serial.println(Firebase.error());
-		}
-
-		if (Firebase.available()) {
-			FirebaseObject event = Firebase.readEvent();
-			String path = event.getString("path");
-			String eventType = event.getString("type");
-			eventType.toLowerCase();
-			// TODO see what happens if both values change
-			if (eventType == "put") {
-				if (path == STREAM_DATA_REQUEST && event.getBool("data")) {
-					Serial.println("send request");
-					if (sendTelemetry.isSuspended()) {
-						sendTelemetry.runTask();
+		FirebaseData streams[2] = {dataRequestStream, waterRequestStream};
+		for (int i = 0; i < 2; ++i) {
+			if (!Firebase.readStream(streams[i])) {
+				Serial.println("Can't read stream data...");
+				Serial.println("REASON: " + streams[i].errorReason());
+				Serial.println();
+			}
+			if (streams[i].streamTimeout()) {
+				Serial.println("Stream timeout, resume streaming...\n");
+			}
+			if (streams[i].streamAvailable()) {
+				if (streams[i].eventType() == "put" && streams[i].dataType() == "boolean") {
+					if (streams[i].boolData() == 1) {
+						// dataRequestStream
+						if (i == 0) {
+							Serial.println("Telemetry requested\n");
+							if (sendTelemetry.isSuspended()) {
+								sendTelemetry.runTask();
+							}
+							Firebase.setBool(dataRequestStream, STREAM_DATA_REQUEST, false);
+						}
+						// waterRequestStream
+						if (i == 1) {
+							Serial.println("Irrigation requested\n");
+							if (irrigate.isSuspended()) {
+								irrigate.runTask();
+							}
+							if (sendTelemetry.isSuspended()) {
+								sendTelemetry.runTask();
+							}
+							Firebase.setBool(waterRequestStream, STREAM_WATER_NOW_REQUEST, false);
+						}
 					}
-					Firebase.setBool(STREAM_DATA_REQUEST, false);
-				}
-				if (path == STREAM_WATER_NOW_REQUEST && event.getBool("data")) {
-					Serial.println("water request");
-					if (irrigate.isSuspended()) {
-						irrigate.runTask();
-					}
-					if (sendTelemetry.isSuspended()) {
-						sendTelemetry.runTask();
-					}
-					Firebase.setBool(STREAM_WATER_NOW_REQUEST, false);
 				}
 			}
-			this->delay(500);
 		}
+		this->delay(500);
 	}
 } listenStream;
 
@@ -200,7 +219,7 @@ void setup() {
 	Scheduler.start(&sendTelemetry);
 	Scheduler.start(&irrigate);
 	Scheduler.start(&check);
-	// Scheduler.start(&listenStream); // See TODO in ListenStream task
+	Scheduler.start(&listenStream);
 	Scheduler.begin();
 }
 
