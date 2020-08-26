@@ -13,8 +13,7 @@
 #include <Scheduler.h>
 #include "params.h"
 
-FirebaseData dataRequestStream;
-FirebaseData waterRequestStream;
+FirebaseData firebaseStreamData;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", TIME_ZONE * 3600);
@@ -76,14 +75,9 @@ public:
 		// TODO 25/AUG/2020 See full settings for firebase
 		Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
 		Firebase.reconnectWiFi(true);
-		if (!Firebase.beginStream(dataRequestStream, STREAM_DATA_REQUEST)) {
+		if (!Firebase.beginStream(firebaseStreamData, "/")) {
 			Serial.println("Can't begin stream connection...");
-			Serial.println("REASON: " + dataRequestStream.errorReason());
-			Serial.println();
-		}
-		if (!Firebase.beginStream(waterRequestStream, STREAM_WATER_NOW_REQUEST)) {
-			Serial.println("Can't begin stream connection...");
-			Serial.println("REASON: " + waterRequestStream.errorReason());
+			Serial.println("REASON: " + firebaseStreamData.errorReason());
 			Serial.println();
 		}
 
@@ -167,38 +161,34 @@ public:
 			yield();
 		}
 
-		FirebaseData streams[2] = {dataRequestStream, waterRequestStream};
-		for (int i = 0; i < 2; ++i) {
-			if (!Firebase.readStream(streams[i])) {
-				Serial.println("Can't read stream data...");
-				Serial.println("REASON: " + streams[i].errorReason());
-				Serial.println();
-			}
-			if (streams[i].streamTimeout()) {
-				Serial.println("Stream timeout, resume streaming...\n");
-			}
-			if (streams[i].streamAvailable()) {
-				if (streams[i].eventType() == "put" && streams[i].dataType() == "boolean") {
-					if (streams[i].boolData() == 1) {
-						// dataRequestStream
-						if (i == 0) {
-							Serial.println("Telemetry requested\n");
-							if (sendTelemetry.isSuspended()) {
-								sendTelemetry.runTask();
-							}
-							Firebase.setBool(dataRequestStream, STREAM_DATA_REQUEST, false);
+		if (!Firebase.readStream(firebaseStreamData)) {
+			Serial.println("Can't read stream data...");
+			Serial.println("REASON: " + firebaseStreamData.errorReason());
+			Serial.println();
+		}
+		if (firebaseStreamData.streamTimeout()) {
+			Serial.println("Stream timeout, resume streaming...\n");
+		}
+		// TODO there must be something wrong with the paths or something... just doesn't trigger anything
+		if (firebaseStreamData.streamAvailable()) {
+			if (firebaseStreamData.eventType() == "put" && firebaseStreamData.dataType() == "boolean") {
+				if (firebaseStreamData.boolData() == 1) {
+					if (firebaseStreamData.streamPath() == STREAM_DATA_REQUEST) {
+						Serial.println("Telemetry requested\n");
+						if (sendTelemetry.isSuspended()) {
+							sendTelemetry.runTask();
 						}
-						// waterRequestStream
-						if (i == 1) {
-							Serial.println("Irrigation requested\n");
-							if (irrigate.isSuspended()) {
-								irrigate.runTask();
-							}
-							if (sendTelemetry.isSuspended()) {
-								sendTelemetry.runTask();
-							}
-							Firebase.setBool(waterRequestStream, STREAM_WATER_NOW_REQUEST, false);
+						Firebase.setBool(firebaseStreamData, STREAM_DATA_REQUEST, false);
+					}
+					if (firebaseStreamData.streamPath() == STREAM_WATER_NOW_REQUEST) {
+						Serial.println("Irrigation requested\n");
+						if (irrigate.isSuspended()) {
+							irrigate.runTask();
 						}
+						if (sendTelemetry.isSuspended()) {
+							sendTelemetry.runTask();
+						}
+						Firebase.setBool(firebaseStreamData, STREAM_WATER_NOW_REQUEST, false);
 					}
 				}
 			}
