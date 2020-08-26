@@ -13,7 +13,7 @@
 #include <Scheduler.h>
 #include "params.h"
 
-FirebaseData firebaseStreamData;
+FirebaseData firebaseData;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", TIME_ZONE * 3600);
@@ -75,9 +75,9 @@ public:
 		// TODO 25/AUG/2020 See full settings for firebase
 		Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
 		Firebase.reconnectWiFi(true);
-		if (!Firebase.beginStream(firebaseStreamData, "/")) {
+		if (!Firebase.beginStream(firebaseData, "/")) {
 			Serial.println("Can't begin stream connection...");
-			Serial.println("REASON: " + firebaseStreamData.errorReason());
+			Serial.println("REASON: " + firebaseData.errorReason());
 			Serial.println();
 		}
 
@@ -93,20 +93,33 @@ public:
 	void loop() {
 		BaseTask::loop();
 		if (!isWiFiConnected() && connect.isSuspended()) {
+			Serial.println("Waiting for connection...");
 			connect.runTask();
 		}
 		while (connect.isRunning()) {
 			yield();
 		}
+		Serial.println("Sending data");
 
 		timeClient.update();
-		// TODO send for real
-		Serial.println(timeClient.getEpochTime());
-		Serial.println(readSensor(HUMIDITY_SENSOR));
-		Serial.println(readSensor(TEMP_SENSOR));
-		Serial.println(readSensor(LIGHT_SENSOR));
-		Serial.println(readSensor(WATER_LEVEL_SENSOR));
-		Serial.println("ENVIANDO");
+		FirebaseJson json;
+		json.set("time", String(timeClient.getEpochTime()));  // Can't set unsigned longs
+		json.set("humidity", readSensor(HUMIDITY_SENSOR));
+		json.set("light", readSensor(TEMP_SENSOR));
+		json.set("temperature", readSensor(LIGHT_SENSOR));
+
+		if (Firebase.push(firebaseData, "/plants/plantita1/", json)) {
+			Serial.println("Push passed");
+		} else {
+			Serial.println("Push failed");
+			Serial.println("REASON: " + firebaseData.errorReason());
+		}
+
+		String str;
+		json.toString(str, true);
+		Serial.println(str);
+
+		json.clear();
 		suspendTask();
 	}
 } sendTelemetry;
@@ -119,7 +132,7 @@ public:
 	void loop() {
 		BaseTask::loop();
 		digitalWrite(WATER_PUMP_PIN, HIGH);
-		Serial.println("regando");
+		Serial.println("Watering plant");
 		this->delay(WATER_SECONDS * 1000);
 		digitalWrite(WATER_PUMP_PIN, LOW);
 		suspendTask();
@@ -129,21 +142,15 @@ public:
 class Check: public BaseTask {
 public:
 	void loop() {
-		Serial.println("checking");
+		Serial.println("Checking");
 		if (readSensor(HUMIDITY_SENSOR) > HUMIDITY_THRESHOLD && ((millis() / 1000) - lastWatered) >= WAIT_DELAY_SECONDS) {
-			Serial.println("deberia regar");
 			if (irrigate.isSuspended()) {
 				irrigate.runTask();
-			} else {
-				Serial.println("ya estoy regando");
 			}
 			lastWatered = millis() / 1000;
 		}
-		Serial.println("deberia enviar");
 		if (sendTelemetry.isSuspended()) {
 			sendTelemetry.runTask();
-		} else {
-			Serial.println("ya estoy enviando");
 		}
 		this->delay(CHECK_TIME_SECONDS * 1000);
 	}
@@ -161,25 +168,22 @@ public:
 			yield();
 		}
 
-		if (!Firebase.readStream(firebaseStreamData)) {
+		if (!Firebase.readStream(firebaseData)) {
 			Serial.println("Can't read stream data...");
-			Serial.println("REASON: " + firebaseStreamData.errorReason());
+			Serial.println("REASON: " + firebaseData.errorReason());
 			Serial.println();
 		}
-		if (firebaseStreamData.streamTimeout()) {
-			Serial.println("Stream timeout, resume streaming...\n");
-		}
-		if (firebaseStreamData.streamAvailable()) {
-			if (firebaseStreamData.eventType() == "put" && firebaseStreamData.dataType() == "boolean") {
-				if (firebaseStreamData.boolData() == 1) {
-					if (firebaseStreamData.dataPath() == STREAM_DATA_REQUEST) {
+		if (firebaseData.streamAvailable()) {
+			if (firebaseData.eventType() == "put" && firebaseData.dataType() == "boolean") {
+				if (firebaseData.boolData() == 1) {
+					if (firebaseData.dataPath() == STREAM_DATA_REQUEST) {
 						Serial.println("Telemetry requested\n");
 						if (sendTelemetry.isSuspended()) {
 							sendTelemetry.runTask();
 						}
-						Firebase.setBool(firebaseStreamData, STREAM_DATA_REQUEST, false);
+						Firebase.setBool(firebaseData, STREAM_DATA_REQUEST, false);
 					}
-					if (firebaseStreamData.dataPath() == STREAM_WATER_NOW_REQUEST) {
+					if (firebaseData.dataPath() == STREAM_WATER_NOW_REQUEST) {
 						Serial.println("Irrigation requested\n");
 						if (irrigate.isSuspended()) {
 							irrigate.runTask();
@@ -187,7 +191,7 @@ public:
 						if (sendTelemetry.isSuspended()) {
 							sendTelemetry.runTask();
 						}
-						Firebase.setBool(firebaseStreamData, STREAM_WATER_NOW_REQUEST, false);
+						Firebase.setBool(firebaseData, STREAM_WATER_NOW_REQUEST, false);
 					}
 				}
 			}

@@ -16,7 +16,7 @@
 #define STREAM_WATER_NOW_REQUEST "/plants/plantita1/water now"
 
 // Connections (GPIO pins are different to the printed ones on the board)
-#define WATER_PUMP_PIN 2  // D4
+#define WATER_PUMP_PIN 15  // D5
 #define COMMON_ANALOG_INPUT A0
 #define S0 5   // D1
 #define S1 4   // D2
