@@ -14,6 +14,7 @@
 #include "params.h"
 
 FirebaseData firebaseData;
+unsigned long lastIrrigation = 0;  // TODO 26/AUG/2020 Make it send this value when irrigation is called, waiting till refreshes it
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", TIME_ZONE * 3600);
@@ -107,6 +108,11 @@ public:
 		json.set("humidity", readSensor(HUMIDITY_SENSOR));
 		json.set("light", readSensor(TEMP_SENSOR));
 		json.set("temperature", readSensor(LIGHT_SENSOR));
+		if (lastIrrigation != 0) {
+			json.set("last irrigation", String(lastIrrigation));  // Can't set unsigned longs
+		} else {
+			json.set("last irrigation", "unknown");
+		}
 
 		if (Firebase.push(firebaseData, "/plants/plantita1/", json)) {
 			Serial.println("Push passed");
@@ -131,6 +137,12 @@ public:
 	}
 	void loop() {
 		BaseTask::loop();
+		if (isWiFiConnected()) {
+			timeClient.update();
+			lastIrrigation = timeClient.getEpochTime();
+		} else {
+			lastIrrigation = 0;
+		}
 		digitalWrite(WATER_PUMP_PIN, HIGH);
 		Serial.println("Watering plant");
 		this->delay(WATER_SECONDS * 1000);
