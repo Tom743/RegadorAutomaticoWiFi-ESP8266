@@ -143,10 +143,10 @@ public:
 		} else {
 			lastIrrigation = 0;
 		}
-		digitalWrite(WATER_PUMP_PIN, HIGH);
+		digitalWrite(WATER_PUMP_PIN, PUMP_HIGH_STATE);
 		Serial.println("Watering plant");
 		this->delay(WATER_SECONDS * 1000);
-		digitalWrite(WATER_PUMP_PIN, LOW);
+		digitalWrite(WATER_PUMP_PIN, !PUMP_HIGH_STATE);
 		suspendTask();
 	}
 } irrigate;
@@ -219,6 +219,7 @@ void setup() {
 	pinMode(S2, OUTPUT);
 	pinMode(S3, OUTPUT);
 	pinMode(WATER_PUMP_PIN, OUTPUT);
+	digitalWrite(WATER_PUMP_PIN, !PUMP_HIGH_STATE);
 
 	Scheduler.start(&connect);
 	Scheduler.start(&sendTelemetry);
