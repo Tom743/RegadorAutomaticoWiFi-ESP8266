@@ -188,14 +188,14 @@ public:
 		if (firebaseData.streamAvailable()) {
 			if (firebaseData.eventType() == "put" && firebaseData.dataType() == "boolean") {
 				if (firebaseData.boolData() == 1) {
-					if (firebaseData.dataPath() == STREAM_DATA_REQUEST) {
+					if (firebaseData.dataPath() == PATH_DATA_REQUEST) {
 						Serial.println("Telemetry requested\n");
 						if (sendTelemetry.isSuspended()) {
 							sendTelemetry.runTask();
 						}
-						Firebase.setBool(firebaseData, STREAM_DATA_REQUEST, false);
+						Firebase.setBool(firebaseData, PATH_DATA_REQUEST, false);
 					}
-					if (firebaseData.dataPath() == STREAM_WATER_NOW_REQUEST) {
+					if (firebaseData.dataPath() == PATH_WATER_NOW_REQUEST) {
 						Serial.println("Irrigation requested\n");
 						if (irrigate.isSuspended()) {
 							irrigate.runTask();
@@ -203,7 +203,7 @@ public:
 						if (sendTelemetry.isSuspended()) {
 							sendTelemetry.runTask();
 						}
-						Firebase.setBool(firebaseData, STREAM_WATER_NOW_REQUEST, false);
+						Firebase.setBool(firebaseData, PATH_WATER_NOW_REQUEST, false);
 					}
 				}
 			}
